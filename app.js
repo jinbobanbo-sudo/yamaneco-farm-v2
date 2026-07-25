@@ -94,57 +94,6 @@ function bindChips(root) {
 }
 const chipVal = name => $(`[data-chips="${name}"] .chip.on`)?.dataset.v || '';
 
-/* ---------- Face IDロック ---------- */
-const lock = {
-  get on() { return localStorage.getItem('lockOn') === '1'; },
-  set on(v) { localStorage.setItem('lockOn', v ? '1' : '0'); },
-  get id() { return localStorage.getItem('lockId') || ''; },
-  set id(v) { localStorage.setItem('lockId', v); },
-};
-const bufToB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
-function b64ToBuf(b64) {
-  const s = atob(b64); const a = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
-  return a.buffer;
-}
-async function enrollLock() {
-  const cred = await navigator.credentials.create({ publicKey: {
-    challenge: crypto.getRandomValues(new Uint8Array(32)),
-    rp: { name: 'ヤマネコファーム' },
-    user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'yamaneko', displayName: 'ヤマネコファーム' },
-    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-    authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
-    timeout: 60000,
-  }});
-  lock.id = bufToB64(cred.rawId);
-  lock.on = true;
-}
-let authCtl = null;
-async function verifyLock() {
-  if (authCtl) authCtl.abort();
-  authCtl = new AbortController();
-  await navigator.credentials.get({ signal: authCtl.signal, publicKey: {
-    challenge: crypto.getRandomValues(new Uint8Array(32)),
-    allowCredentials: [{ type: 'public-key', id: b64ToBuf(lock.id), transports: ['internal'] }],
-    userVerification: 'required', timeout: 60000,
-  }});
-  authCtl = null;
-}
-let unlockFails = 0;
-async function tryUnlock() {
-  const msg = $('#lockMsg');
-  if (msg) msg.textContent = '';
-  try {
-    await verifyLock();
-    $('#lockscreen').hidden = true;
-  } catch (e) {
-    if (e && e.name === 'AbortError') return;
-    unlockFails++;
-    if (msg) msg.textContent = '解除できませんでした(' + (e.name || 'エラー') + ')。もう一度タップしてください。';
-    if (unlockFails >= 2) $('#lockReset').hidden = false;
-  }
-}
-
 /* ---------- 集計 ---------- */
 function monthKey(d) { return String(d || '').slice(0, 7); }
 function thisMonthSales() { const m = monthKey(today()); return S.sales.filter(r => monthKey(r['販売日']) === m); }
@@ -351,15 +300,9 @@ async function ask(question, label) {
 
 /* ---------- 設定 ---------- */
 function renderSettings() {
-  const lockable = !!window.PublicKeyCredential;
   view.innerHTML = `
     <div class="eyebrow" style="margin-bottom:14px">設定</div>
-    <div class="lock-row">
-      <div><div class="t">Face IDロック</div>
-      <div class="d">${lockable ? 'アプリを開くたびに顔認証/指紋認証を求めます(この端末のみ)' : 'この環境では利用できません'}</div></div>
-      <button class="switch ${lock.on ? 'on' : ''}" id="lockToggle" ${lockable ? '' : 'disabled'}>${lock.on ? 'ON' : 'OFF'}</button>
-    </div>
-    <div class="field" style="margin-top:18px"><label>GAS WebアプリのURL</label><input id="s-url" value="${esc(cfg.url)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
+    <div class="field"><label>GAS WebアプリのURL</label><input id="s-url" value="${esc(cfg.url)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
     <div class="field"><label>合言葉(使わない場合は空欄)</label><input id="s-token" value="${esc(cfg.token)}"></div>
     <div class="field"><label>記録者の名前(任意)</label><input id="s-rec" value="${esc(cfg.recorder)}" placeholder="ゆい など"></div>
     <button class="btn" id="s-save">保存して接続テスト</button>
@@ -371,17 +314,6 @@ function renderSettings() {
   $('#s-save').addEventListener('click', async () => {
     cfg.url = $('#s-url').value; cfg.token = $('#s-token').value; cfg.recorder = $('#s-rec').value;
     await reload();
-  });
-  $('#lockToggle').addEventListener('click', async () => {
-    try {
-      if (lock.on) {
-        await verifyLock();
-        lock.on = false; toast('Face IDロックを解除しました');
-      } else {
-        await enrollLock(); toast('Face IDロックを有効にしました');
-      }
-      renderSettings();
-    } catch (e) { toast('認証がキャンセルされました'); }
   });
 }
 function drawMaster(kind) {
@@ -419,13 +351,6 @@ $('#tabbar').addEventListener('click', e => {
 });
 
 /* ---------- 起動 ---------- */
-if (lock.on && window.PublicKeyCredential) {
-  $('#lockscreen').hidden = false;
-  $('#unlockBtn').addEventListener('click', tryUnlock);
-  $('#lockReset').addEventListener('click', () => {
-    if (confirm('Face IDロックを無効にしてアプリを開きますか?')) { lock.on = false; location.reload(); }
-  });
-}
 render();
 if (cfg.url) reload(true); else switchTab('settings');
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
