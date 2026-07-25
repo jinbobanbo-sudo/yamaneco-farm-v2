@@ -119,18 +119,30 @@ async function enrollLock() {
   lock.id = bufToB64(cred.rawId);
   lock.on = true;
 }
+let authCtl = null;
 async function verifyLock() {
-  await navigator.credentials.get({ publicKey: {
+  if (authCtl) authCtl.abort();
+  authCtl = new AbortController();
+  await navigator.credentials.get({ signal: authCtl.signal, publicKey: {
     challenge: crypto.getRandomValues(new Uint8Array(32)),
     allowCredentials: [{ type: 'public-key', id: b64ToBuf(lock.id), transports: ['internal'] }],
     userVerification: 'required', timeout: 60000,
   }});
+  authCtl = null;
 }
+let unlockFails = 0;
 async function tryUnlock() {
+  const msg = $('#lockMsg');
+  if (msg) msg.textContent = '';
   try {
     await verifyLock();
     $('#lockscreen').hidden = true;
-  } catch (e) { toast('解除できませんでした。もう一度お試しください。'); }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;
+    unlockFails++;
+    if (msg) msg.textContent = '解除できませんでした(' + (e.name || 'エラー') + ')。もう一度タップしてください。';
+    if (unlockFails >= 2) $('#lockReset').hidden = false;
+  }
 }
 
 /* ---------- 集計 ---------- */
@@ -410,8 +422,10 @@ $('#tabbar').addEventListener('click', e => {
 if (lock.on && window.PublicKeyCredential) {
   $('#lockscreen').hidden = false;
   $('#unlockBtn').addEventListener('click', tryUnlock);
-  tryUnlock();
-} 
+  $('#lockReset').addEventListener('click', () => {
+    if (confirm('Face IDロックを無効にしてアプリを開きますか?')) { lock.on = false; location.reload(); }
+  });
+}
 render();
 if (cfg.url) reload(true); else switchTab('settings');
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');

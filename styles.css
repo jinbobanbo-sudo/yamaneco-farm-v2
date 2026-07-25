@@ -161,6 +161,7 @@ main { max-width: 560px; margin: 0 auto; padding: calc(18px + env(safe-area-inse
 
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%); max-width: 90vw; width: max-content;
-  bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 60;
+  bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 110;
   background: var(--ink); color: #fff; padding: 11px 20px; border-radius: 999px; font-size: .86rem;
 }
+.lock-msg { font-size: .8rem; color: var(--gray); min-height: 1.3em; text-align: center; }
