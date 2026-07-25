@@ -194,3 +194,6 @@ i.dw { background: var(--amber); }
 .edit-toggle { color: var(--green); font-weight: 700; font-size: .72rem; margin-left: 10px; }
 .chips.editing .chip:not(.chip-add) { border-color: #e05656; color: #e05656; background: #fff; font-weight: 500; }
 .chips.editing .chip:not(.chip-add)::after { content: " ×"; font-weight: 700; }
+.rec.tap { cursor: pointer; }
+.rec.tap:active { background: var(--mist); }
+.cal-legend .hint { margin-left: auto; }

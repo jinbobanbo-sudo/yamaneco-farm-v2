@@ -1,4 +1,4 @@
-/* ヤマネコファーム v3 — app.js (カレンダー記録・複数作物・チップ内マスタ編集) */
+/* ヤマネコファーム v3.1 — app.js (日付正規化・記録編集・Gemini履歴の永続化) */
 'use strict';
 
 /* ---------- 設定と状態 ---------- */
@@ -22,7 +22,7 @@ let S = {
   chat: [],
   loaded: false,
 };
-try { Object.assign(S, JSON.parse(localStorage.getItem('cache') || '{}'), { tab: 'home', chat: [], calMonth: todayStr().slice(0, 7), selDay: todayStr() }); } catch (e) {}
+try { Object.assign(S, JSON.parse(localStorage.getItem('cache') || '{}'), { tab: 'home', calMonth: todayStr().slice(0, 7), selDay: todayStr() }); } catch (e) {}
 
 const $ = (s, el) => (el || document).querySelector(s);
 const view = $('#view');
@@ -30,6 +30,15 @@ const yen = n => '¥' + Number(n || 0).toLocaleString('ja-JP');
 const num = n => Number(n || 0).toLocaleString('ja-JP');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtDay = d => { const p = String(d).split('-'); return `${Number(p[1])}月${Number(p[2])}日`; };
+
+/* 日付を必ず yyyy-mm-dd(端末タイムゾーン)に揃える */
+function normDate(v) {
+  if (!v) return '';
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  return isNaN(d) ? s : d.toLocaleDateString('sv-SE');
+}
 
 /* ---------- API ---------- */
 async function api(action, payload) {
@@ -47,8 +56,12 @@ async function reload(silent) {
   try {
     if (!silent) toast('読み込み中…', true);
     const d = await api('boot');
-    S.masters = d.masters; S.work = d.work; S.sales = d.sales; S.loaded = true;
-    localStorage.setItem('cache', JSON.stringify({ masters: S.masters, work: S.work, sales: S.sales, loaded: true }));
+    S.masters = d.masters;
+    S.work = (d.work || []).map(r => ({ ...r, 作業日: normDate(r['作業日']) }));
+    S.sales = (d.sales || []).map(r => ({ ...r, 販売日: normDate(r['販売日']) }));
+    S.chat = d.chat || [];
+    S.loaded = true;
+    localStorage.setItem('cache', JSON.stringify({ masters: S.masters, work: S.work, sales: S.sales, chat: S.chat, loaded: true }));
     render();
     if (!silent) toast('最新の状態です');
   } catch (e) { toast(e.message); }
@@ -163,21 +176,21 @@ function renderHome() {
   $('#goRec').addEventListener('click', () => switchTab('records'));
 }
 
-function recRow(kind, r, delBtn) {
+function recRow(kind, r, editable) {
   if (kind === 'sales') {
-    return `<div class="rec" data-id="${r.id}" data-k="sales">
+    return `<div class="rec${editable ? ' tap' : ''}" data-id="${r.id}" data-k="sales">
       <span class="dot"></span>
       <div class="body"><div class="t1">${esc(r['品目'])} × ${esc(r['数量'])}</div>
       <div class="t2">${esc(r['販売日'])} ・ ${esc(r['販路'])}${r['メモ'] ? ' ・ ' + esc(r['メモ']) : ''}</div></div>
       <span class="amt">${yen(r['金額'])}</span>
-      ${delBtn ? '<button class="del">削除</button>' : ''}</div>`;
+      ${editable ? '<button class="del">削除</button>' : ''}</div>`;
   }
-  return `<div class="rec" data-id="${r.id}" data-k="work">
+  return `<div class="rec${editable ? ' tap' : ''}" data-id="${r.id}" data-k="work">
     <span class="dot work"></span>
     ${r['写真URL'] ? `<img class="thumb" src="${esc(r['写真URL'])}" alt="">` : ''}
     <div class="body"><div class="t1">${esc(r['作物'])} ・ ${esc(r['作業種別'])}</div>
     <div class="t2">${esc(r['作業日'])}${r['作業時間分'] ? ' ・ ' + esc(r['作業時間分']) + '分' : ''}${r['メモ'] ? ' ・ ' + esc(r['メモ']) : ''}</div></div>
-    ${delBtn ? '<button class="del">削除</button>' : ''}</div>`;
+    ${editable ? '<button class="del">削除</button>' : ''}</div>`;
 }
 
 /* ---------- 記録(カレンダー) ---------- */
@@ -210,7 +223,7 @@ function renderRecords() {
     </div>
     <div class="cal-dow">${'日月火水木金土'.split('').map((c, i) => `<div class="${i === 0 ? 'sun' : ''}">${c}</div>`).join('')}</div>
     <div class="cal-grid" id="calGrid">${cells}</div>
-    <div class="cal-legend"><span><i class="ds"></i>販売</span><span><i class="dw"></i>作業</span></div>
+    <div class="cal-legend"><span><i class="ds"></i>販売</span><span><i class="dw"></i>作業</span><span class="hint">記録をタップで編集</span></div>
     <div class="section">
       <h2>${fmtDay(S.selDay)}の記録${daySum ? `<span class="day-sum">${yen(daySum)}</span>` : ''}</h2>
       <div id="list">${dayS.length + dayW.length
@@ -232,18 +245,24 @@ function renderRecords() {
   });
   $('#fab').addEventListener('click', sheetChoose);
   $('#list').addEventListener('click', async e => {
-    const del = e.target.closest('.del'); if (!del) return;
-    const rec = del.closest('.rec');
-    if (!confirm('この記録を削除しますか?')) return;
-    try {
-      await api('deleteRecord', { sheet: rec.dataset.k, id: rec.dataset.id });
-      toast('削除しました');
-      const key = rec.dataset.k === 'sales' ? S.sales : S.work;
-      const i = key.findIndex(r => r.id === rec.dataset.id);
-      if (i >= 0) key.splice(i, 1);
-      renderRecords();
-      reload(true);
-    } catch (err) { toast(err.message); }
+    const rec = e.target.closest('.rec'); if (!rec) return;
+    const isSales = rec.dataset.k === 'sales';
+    if (e.target.closest('.del')) {
+      if (!confirm('この記録を削除しますか?')) return;
+      try {
+        await api('deleteRecord', { sheet: rec.dataset.k, id: rec.dataset.id });
+        toast('削除しました');
+        const arr = isSales ? S.sales : S.work;
+        const i = arr.findIndex(r => String(r.id) === rec.dataset.id);
+        if (i >= 0) arr.splice(i, 1);
+        renderRecords();
+        reload(true);
+      } catch (err) { toast(err.message); }
+      return;
+    }
+    const arr = isSales ? S.sales : S.work;
+    const r = arr.find(x => String(x.id) === rec.dataset.id);
+    if (r) isSales ? sheetSales(r) : sheetWork(r);
   });
 }
 
@@ -253,26 +272,26 @@ function sheetChoose() {
     <button class="btn green" id="c-sales" style="margin-bottom:10px">販売を記録</button>
     <button class="btn" id="c-work">作業を記録</button>
     <button class="btn-ghost" onclick="closeSheet()">キャンセル</button>`);
-  $('#c-sales').addEventListener('click', sheetSales);
-  $('#c-work').addEventListener('click', sheetWork);
+  $('#c-sales').addEventListener('click', () => sheetSales());
+  $('#c-work').addEventListener('click', () => sheetWork());
 }
 
-async function sheetSales() {
+async function sheetSales(rec) {
   if (!await ensureMasters()) return;
   openSheet(`
-    <h3>販売を記録</h3>
-    <div class="field"><label>販売日</label><input type="date" id="f-date" value="${S.selDay}"></div>
-    ${fieldChips('品目', 'item', '作物', { selected: S.masters.作物[0] })}
-    ${fieldChips('販路', 'channel', '販路', { selected: S.masters.販路[0] })}
+    <h3>${rec ? '販売を編集' : '販売を記録'}</h3>
+    <div class="field"><label>販売日</label><input type="date" id="f-date" value="${rec ? esc(rec['販売日']) : S.selDay}"></div>
+    ${fieldChips('品目', 'item', '作物', { selected: rec ? rec['品目'] : S.masters.作物[0] })}
+    ${fieldChips('販路', 'channel', '販路', { selected: rec ? rec['販路'] : S.masters.販路[0] })}
     <div class="row2">
-      <div class="field"><label>数量</label><input type="number" id="f-qty" inputmode="decimal" placeholder="0"></div>
-      <div class="field"><label>単価(円)</label><input type="number" id="f-price" inputmode="numeric" placeholder="0"></div>
+      <div class="field"><label>数量</label><input type="number" id="f-qty" inputmode="decimal" value="${rec ? esc(rec['数量']) : ''}" placeholder="0"></div>
+      <div class="field"><label>単価(円)</label><input type="number" id="f-price" inputmode="numeric" value="${rec ? esc(rec['単価']) : ''}" placeholder="0"></div>
     </div>
     <div class="row2">
-      <div class="field"><label>手数料(円・任意)</label><input type="number" id="f-fee" inputmode="numeric"></div>
-      <div class="field"><label>メモ(任意)</label><input type="text" id="f-memo"></div>
+      <div class="field"><label>手数料(円・任意)</label><input type="number" id="f-fee" inputmode="numeric" value="${rec ? esc(rec['手数料']) : ''}"></div>
+      <div class="field"><label>メモ(任意)</label><input type="text" id="f-memo" value="${rec ? esc(rec['メモ']) : ''}"></div>
     </div>
-    <button class="btn green" id="f-save">保存する</button>
+    <button class="btn green" id="f-save">${rec ? '更新する' : '保存する'}</button>
     <button class="btn-ghost" onclick="closeSheet()">キャンセル</button>`);
   bindChips($('#sheet'));
   $('#f-save').addEventListener('click', async () => {
@@ -282,23 +301,25 @@ async function sheetSales() {
       fee: $('#f-fee').value, memo: $('#f-memo').value, recorder: cfg.recorder,
     };
     if (!p.date || !p.item || !p.channel || !p.qty || !p.unitPrice) return toast('日付・品目・販路・数量・単価は必須です');
-    await save('addSales', p);
+    if (rec) p.id = rec.id;
+    await save(rec ? 'updateSales' : 'addSales', p);
   });
 }
 
-async function sheetWork() {
+async function sheetWork(rec) {
   if (!await ensureMasters()) return;
+  const selCrops = rec ? String(rec['作物']).split('、').filter(Boolean) : [];
   openSheet(`
-    <h3>作業を記録</h3>
-    <div class="field"><label>作業日</label><input type="date" id="f-date" value="${S.selDay}"></div>
-    ${fieldChips('作物(複数選択可)', 'crop', '作物', { multi: true, selected: [] })}
-    ${fieldChips('作業種別', 'wtype', '作業種別', { selected: S.masters.作業種別[0] })}
+    <h3>${rec ? '作業を編集' : '作業を記録'}</h3>
+    <div class="field"><label>作業日</label><input type="date" id="f-date" value="${rec ? esc(rec['作業日']) : S.selDay}"></div>
+    ${fieldChips('作物(複数選択可)', 'crop', '作物', { multi: true, selected: selCrops })}
+    ${fieldChips('作業種別', 'wtype', '作業種別', { selected: rec ? rec['作業種別'] : S.masters.作業種別[0] })}
     <div class="row2">
-      <div class="field"><label>作業時間(分・任意)</label><input type="number" id="f-min" inputmode="numeric"></div>
+      <div class="field"><label>作業時間(分・任意)</label><input type="number" id="f-min" inputmode="numeric" value="${rec ? esc(rec['作業時間分']) : ''}"></div>
       <div class="field"><label>写真(任意)</label><input type="file" id="f-photo" accept="image/*"></div>
     </div>
-    <div class="field"><label>メモ(任意)</label><textarea id="f-memo" rows="2"></textarea></div>
-    <button class="btn green" id="f-save">保存する</button>
+    <div class="field"><label>メモ(任意)</label><textarea id="f-memo" rows="2">${rec ? esc(rec['メモ']) : ''}</textarea></div>
+    <button class="btn green" id="f-save">${rec ? '更新する' : '保存する'}</button>
     <button class="btn-ghost" onclick="closeSheet()">キャンセル</button>`);
   bindChips($('#sheet'));
   $('#f-save').addEventListener('click', async () => {
@@ -310,7 +331,8 @@ async function sheetWork() {
     if (!p.date || !crops.length || !p.type) return toast('日付・作物(1つ以上)・作業種別は必須です');
     const file = $('#f-photo').files[0];
     if (file) p.photoBase64 = await compress(file);
-    await save('addWork', p);
+    if (rec) { p.id = rec.id; p.photoUrl = rec['写真URL'] || ''; }
+    await save(rec ? 'updateWork' : 'addWork', p);
   });
 }
 
@@ -322,7 +344,8 @@ async function save(action, payload) {
     closeSheet(); toast('保存しました');
     reload(true);
   } catch (e) {
-    toast(e.message); btn.disabled = false; btn.textContent = '保存する';
+    toast(e.message); btn.disabled = false;
+    btn.textContent = action.startsWith('update') ? '更新する' : '保存する';
   }
 }
 
@@ -352,7 +375,7 @@ function renderAnalysis() {
   view.innerHTML = `
     <div class="eyebrow" style="margin-bottom:12px">GEMINI 分析</div>
     <div class="presets">${PRESETS.map((p, i) => `<button class="chip" data-p="${i}">${p[0]}</button>`).join('')}</div>
-    <div class="chat" id="chat">${S.chat.length ? '' : '<div class="empty">記録データをもとにGeminiが答えます。<br>上のボタンか、下の入力欄からどうぞ。</div>'}</div>
+    <div class="chat" id="chat">${S.chat.length ? '' : '<div class="empty">記録データをもとにGeminiが答えます。<br>やりとりはスプレッドシートの「分析履歴」に保存されます。</div>'}</div>
     <div class="chat-input"><div class="inner">
       <input id="q" placeholder="質問を入力…" autocomplete="off">
       <button id="send" aria-label="送信">↑</button>
@@ -375,9 +398,10 @@ async function ask(question, label) {
   S.chat.push({ role: 'model', text: '考え中…' });
   drawChat();
   try {
-    const history = S.chat.slice(0, -2).map(m => ({ role: m.role, parts: [{ text: m.text }] }));
-    const d = await api('askGemini', { question, history });
+    const history = S.chat.slice(0, -2).slice(-20).map(m => ({ role: m.role === 'model' ? 'model' : 'user', parts: [{ text: m.text }] }));
+    const d = await api('askGemini', { question, label, history });
     S.chat[S.chat.length - 1].text = d.answer;
+    localStorage.setItem('cache', JSON.stringify({ masters: S.masters, work: S.work, sales: S.sales, chat: S.chat, loaded: S.loaded }));
   } catch (e) {
     S.chat[S.chat.length - 1].text = 'エラー: ' + e.message;
   }
@@ -392,7 +416,7 @@ function renderSettings() {
     <div class="field"><label>合言葉(使わない場合は空欄)</label><input id="s-token" value="${esc(cfg.token)}"></div>
     <div class="field"><label>記録者の名前(任意)</label><input id="s-rec" value="${esc(cfg.recorder)}" placeholder="ゆい など"></div>
     <button class="btn" id="s-save">保存して接続テスト</button>
-    <p class="note">作物・販路・作業種別の選択肢は、記録の入力画面で「編集」「＋」からいつでも変更できます。</p>`;
+    <p class="note">作物・販路・作業種別の選択肢は、記録の入力画面で「編集」「＋」からいつでも変更できます。Gemini分析のやりとりはスプレッドシートの「分析履歴」シートに保存されます。</p>`;
   $('#s-save').addEventListener('click', async () => {
     cfg.url = $('#s-url').value; cfg.token = $('#s-token').value; cfg.recorder = $('#s-rec').value;
     await reload();
