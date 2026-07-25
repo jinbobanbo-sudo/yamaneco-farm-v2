@@ -1,4 +1,4 @@
-/* ヤマネコファーム v2.1 — app.js */
+/* ヤマネコファーム v3 — app.js (カレンダー記録・複数作物・チップ内マスタ編集) */
 'use strict';
 
 /* ---------- 設定と状態 ---------- */
@@ -11,21 +11,25 @@ const cfg = {
   set recorder(v) { localStorage.setItem('recorder', v.trim()); },
 };
 
+const todayStr = () => new Date().toLocaleDateString('sv-SE');
+
 let S = {
   masters: { 作物: [], 販路: [], 作業種別: [] },
   work: [], sales: [],
-  tab: 'home', recTab: 'sales',
+  tab: 'home',
+  calMonth: todayStr().slice(0, 7),
+  selDay: todayStr(),
   chat: [],
   loaded: false,
 };
-try { Object.assign(S, JSON.parse(localStorage.getItem('cache') || '{}'), { tab: 'home', chat: [] }); } catch (e) {}
+try { Object.assign(S, JSON.parse(localStorage.getItem('cache') || '{}'), { tab: 'home', chat: [], calMonth: todayStr().slice(0, 7), selDay: todayStr() }); } catch (e) {}
 
 const $ = (s, el) => (el || document).querySelector(s);
 const view = $('#view');
 const yen = n => '¥' + Number(n || 0).toLocaleString('ja-JP');
 const num = n => Number(n || 0).toLocaleString('ja-JP');
-const today = () => new Date().toLocaleDateString('sv-SE');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtDay = d => { const p = String(d).split('-'); return `${Number(p[1])}月${Number(p[2])}日`; };
 
 /* ---------- API ---------- */
 async function api(action, payload) {
@@ -50,7 +54,6 @@ async function reload(silent) {
   } catch (e) { toast(e.message); }
 }
 
-/** マスタが空なら取得し直してから続行 */
 async function ensureMasters() {
   if (S.masters.作物.length && S.masters.販路.length) return true;
   toast('選択肢を読み込み中…', true);
@@ -78,26 +81,59 @@ function openSheet(html) {
 function closeSheet() { $('#sheet').hidden = true; $('#backdrop').hidden = true; }
 $('#backdrop').addEventListener('click', closeSheet);
 
-function chipRow(name, items, selected) {
-  return `<div class="chips" data-chips="${name}">` +
-    items.map(v => `<button type="button" class="chip${v === selected ? ' on' : ''}" data-v="${esc(v)}">${esc(v)}</button>`).join('') +
-    `</div>`;
+/* ---------- チップ(選択+その場で追加・編集) ---------- */
+function chipsHtml(name, kind, opts = {}) {
+  const sel = opts.multi ? (opts.selected || []) : [opts.selected];
+  return `<div class="chips" data-chips="${name}" data-kind="${kind}"${opts.multi ? ' data-multi="1"' : ''}>` +
+    S.masters[kind].map(v => `<button type="button" class="chip${sel.includes(v) ? ' on' : ''}" data-v="${esc(v)}">${esc(v)}</button>`).join('') +
+    `<button type="button" class="chip chip-add" data-add>＋</button></div>`;
+}
+function fieldChips(label, name, kind, opts) {
+  return `<div class="field"><label>${label}<button type="button" class="edit-toggle" data-edit="${name}">編集</button></label>${chipsHtml(name, kind, opts)}</div>`;
+}
+function rebuildChips(g) {
+  const selected = [...g.querySelectorAll('.chip.on')].map(c => c.dataset.v);
+  const kind = g.dataset.kind;
+  g.innerHTML = S.masters[kind].map(v => `<button type="button" class="chip${selected.includes(v) ? ' on' : ''}" data-v="${esc(v)}">${esc(v)}</button>`).join('') +
+    `<button type="button" class="chip chip-add" data-add>＋</button>`;
 }
 function bindChips(root) {
+  root.querySelectorAll('.edit-toggle').forEach(t => {
+    t.addEventListener('click', () => {
+      const g = root.querySelector(`[data-chips="${t.dataset.edit}"]`);
+      g.classList.toggle('editing');
+      t.textContent = g.classList.contains('editing') ? '完了' : '編集';
+    });
+  });
   root.querySelectorAll('[data-chips]').forEach(g => {
-    g.addEventListener('click', e => {
+    g.addEventListener('click', async e => {
+      const kind = g.dataset.kind;
+      if (e.target.closest('[data-add]')) {
+        const v = (prompt(kind + 'を追加:') || '').trim(); if (!v) return;
+        if (S.masters[kind].includes(v)) return toast('すでにあります');
+        try { S.masters = await api('addMaster', { kind, name: v }); rebuildChips(g); toast('追加しました'); }
+        catch (err) { toast(err.message); }
+        return;
+      }
       const b = e.target.closest('.chip'); if (!b) return;
-      g.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
-      b.classList.add('on');
+      if (g.classList.contains('editing')) {
+        if (!confirm(`「${b.dataset.v}」を選択肢から削除しますか?\n(過去の記録は変わりません)`)) return;
+        try { S.masters = await api('deleteMaster', { kind, name: b.dataset.v }); rebuildChips(g); toast('削除しました'); }
+        catch (err) { toast(err.message); }
+        return;
+      }
+      if (g.dataset.multi) b.classList.toggle('on');
+      else { g.querySelectorAll('.chip').forEach(c => c.classList.remove('on')); b.classList.add('on'); }
     });
   });
 }
 const chipVal = name => $(`[data-chips="${name}"] .chip.on`)?.dataset.v || '';
+const chipVals = name => [...document.querySelectorAll(`[data-chips="${name}"] .chip.on`)].map(c => c.dataset.v);
 
 /* ---------- 集計 ---------- */
-function monthKey(d) { return String(d || '').slice(0, 7); }
-function thisMonthSales() { const m = monthKey(today()); return S.sales.filter(r => monthKey(r['販売日']) === m); }
-function thisMonthWork() { const m = monthKey(today()); return S.work.filter(r => monthKey(r['作業日']) === m); }
+const monthKey = d => String(d || '').slice(0, 7);
+const thisMonthSales = () => S.sales.filter(r => monthKey(r['販売日']) === monthKey(todayStr()));
+const thisMonthWork = () => S.work.filter(r => monthKey(r['作業日']) === monthKey(todayStr()));
 
 /* ---------- ホーム ---------- */
 function renderHome() {
@@ -144,41 +180,90 @@ function recRow(kind, r, delBtn) {
     ${delBtn ? '<button class="del">削除</button>' : ''}</div>`;
 }
 
-/* ---------- 記録 ---------- */
+/* ---------- 記録(カレンダー) ---------- */
 function renderRecords() {
-  const isSales = S.recTab === 'sales';
-  const list = isSales ? S.sales : S.work;
+  const [y, m] = S.calMonth.split('-').map(Number);
+  const daysIn = new Date(y, m, 0).getDate();
+  const startDow = new Date(y, m - 1, 1).getDay();
+  const byDay = {};
+  S.sales.forEach(r => { const d = r['販売日']; if (d) (byDay[d] = byDay[d] || { s: 0, w: 0 }).s++; });
+  S.work.forEach(r => { const d = r['作業日']; if (d) (byDay[d] = byDay[d] || { s: 0, w: 0 }).w++; });
+
+  let cells = '';
+  for (let i = 0; i < startDow; i++) cells += '<div class="cal-cell off"></div>';
+  for (let d = 1; d <= daysIn; d++) {
+    const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const b = byDay[key];
+    const cls = 'cal-cell' + (key === S.selDay ? ' sel' : '') + (key === todayStr() ? ' today' : '');
+    cells += `<button class="${cls}" data-d="${key}"><span class="dnum">${d}</span><span class="dots">${b ? (b.s ? '<i class="ds"></i>' : '') + (b.w ? '<i class="dw"></i>' : '') : ''}</span></button>`;
+  }
+
+  const dayS = S.sales.filter(r => r['販売日'] === S.selDay);
+  const dayW = S.work.filter(r => r['作業日'] === S.selDay);
+  const daySum = dayS.reduce((a, r) => a + Number(r['金額'] || 0), 0);
+
   view.innerHTML = `
-    <div class="seg">
-      <button data-s="sales" class="${isSales ? 'on' : ''}">販売<span class="cnt">${S.sales.length}</span></button>
-      <button data-s="work" class="${!isSales ? 'on' : ''}">作業<span class="cnt">${S.work.length}</span></button>
+    <div class="cal-head">
+      <button class="cal-nav" data-nav="-1" aria-label="前の月">‹</button>
+      <div class="cal-title">${y}<span>年</span>${m}<span>月</span></div>
+      <button class="cal-nav" data-nav="1" aria-label="次の月">›</button>
     </div>
-    <div id="list">${list.length ? list.map(r => recRow(S.recTab, r, true)).join('') : '<div class="empty">まだ記録がありません</div>'}</div>
+    <div class="cal-dow">${'日月火水木金土'.split('').map((c, i) => `<div class="${i === 0 ? 'sun' : ''}">${c}</div>`).join('')}</div>
+    <div class="cal-grid" id="calGrid">${cells}</div>
+    <div class="cal-legend"><span><i class="ds"></i>販売</span><span><i class="dw"></i>作業</span></div>
+    <div class="section">
+      <h2>${fmtDay(S.selDay)}の記録${daySum ? `<span class="day-sum">${yen(daySum)}</span>` : ''}</h2>
+      <div id="list">${dayS.length + dayW.length
+        ? dayS.map(r => recRow('sales', r, true)).join('') + dayW.map(r => recRow('work', r, true)).join('')
+        : '<div class="empty">この日の記録はありません。<br>+ から追加できます。</div>'}</div>
+    </div>
     <button class="fab" id="fab" aria-label="記録を追加">＋</button>`;
-  view.querySelector('.seg').addEventListener('click', e => {
-    const b = e.target.closest('button'); if (!b) return;
-    S.recTab = b.dataset.s; renderRecords();
+
+  view.querySelector('.cal-head').addEventListener('click', e => {
+    const b = e.target.closest('.cal-nav'); if (!b) return;
+    const d = new Date(y, m - 1 + Number(b.dataset.nav), 1);
+    S.calMonth = d.toLocaleDateString('sv-SE').slice(0, 7);
+    renderRecords();
   });
-  $('#fab').addEventListener('click', () => isSales ? sheetSales() : sheetWork());
+  $('#calGrid').addEventListener('click', e => {
+    const c = e.target.closest('.cal-cell[data-d]'); if (!c) return;
+    S.selDay = c.dataset.d;
+    renderRecords();
+  });
+  $('#fab').addEventListener('click', sheetChoose);
   $('#list').addEventListener('click', async e => {
     const del = e.target.closest('.del'); if (!del) return;
     const rec = del.closest('.rec');
     if (!confirm('この記録を削除しますか?')) return;
     try {
       await api('deleteRecord', { sheet: rec.dataset.k, id: rec.dataset.id });
-      toast('削除しました'); reload(true);
-      rec.remove();
+      toast('削除しました');
+      const key = rec.dataset.k === 'sales' ? S.sales : S.work;
+      const i = key.findIndex(r => r.id === rec.dataset.id);
+      if (i >= 0) key.splice(i, 1);
+      renderRecords();
+      reload(true);
     } catch (err) { toast(err.message); }
   });
+}
+
+function sheetChoose() {
+  openSheet(`
+    <h3>${fmtDay(S.selDay)}に記録する</h3>
+    <button class="btn green" id="c-sales" style="margin-bottom:10px">販売を記録</button>
+    <button class="btn" id="c-work">作業を記録</button>
+    <button class="btn-ghost" onclick="closeSheet()">キャンセル</button>`);
+  $('#c-sales').addEventListener('click', sheetSales);
+  $('#c-work').addEventListener('click', sheetWork);
 }
 
 async function sheetSales() {
   if (!await ensureMasters()) return;
   openSheet(`
     <h3>販売を記録</h3>
-    <div class="field"><label>販売日</label><input type="date" id="f-date" value="${today()}"></div>
-    <div class="field"><label>品目</label>${chipRow('item', S.masters.作物, S.masters.作物[0])}</div>
-    <div class="field"><label>販路</label>${chipRow('channel', S.masters.販路, S.masters.販路[0])}</div>
+    <div class="field"><label>販売日</label><input type="date" id="f-date" value="${S.selDay}"></div>
+    ${fieldChips('品目', 'item', '作物', { selected: S.masters.作物[0] })}
+    ${fieldChips('販路', 'channel', '販路', { selected: S.masters.販路[0] })}
     <div class="row2">
       <div class="field"><label>数量</label><input type="number" id="f-qty" inputmode="decimal" placeholder="0"></div>
       <div class="field"><label>単価(円)</label><input type="number" id="f-price" inputmode="numeric" placeholder="0"></div>
@@ -205,9 +290,9 @@ async function sheetWork() {
   if (!await ensureMasters()) return;
   openSheet(`
     <h3>作業を記録</h3>
-    <div class="field"><label>作業日</label><input type="date" id="f-date" value="${today()}"></div>
-    <div class="field"><label>作物</label>${chipRow('crop', S.masters.作物, S.masters.作物[0])}</div>
-    <div class="field"><label>作業種別</label>${chipRow('wtype', S.masters.作業種別, S.masters.作業種別[0])}</div>
+    <div class="field"><label>作業日</label><input type="date" id="f-date" value="${S.selDay}"></div>
+    ${fieldChips('作物(複数選択可)', 'crop', '作物', { multi: true, selected: [] })}
+    ${fieldChips('作業種別', 'wtype', '作業種別', { selected: S.masters.作業種別[0] })}
     <div class="row2">
       <div class="field"><label>作業時間(分・任意)</label><input type="number" id="f-min" inputmode="numeric"></div>
       <div class="field"><label>写真(任意)</label><input type="file" id="f-photo" accept="image/*"></div>
@@ -217,11 +302,12 @@ async function sheetWork() {
     <button class="btn-ghost" onclick="closeSheet()">キャンセル</button>`);
   bindChips($('#sheet'));
   $('#f-save').addEventListener('click', async () => {
+    const crops = chipVals('crop');
     const p = {
-      date: $('#f-date').value, crop: chipVal('crop'), type: chipVal('wtype'),
+      date: $('#f-date').value, crop: crops.join('、'), type: chipVal('wtype'),
       minutes: $('#f-min').value, memo: $('#f-memo').value, recorder: cfg.recorder,
     };
-    if (!p.date || !p.crop || !p.type) return toast('日付・作物・作業種別は必須です');
+    if (!p.date || !crops.length || !p.type) return toast('日付・作物(1つ以上)・作業種別は必須です');
     const file = $('#f-photo').files[0];
     if (file) p.photoBase64 = await compress(file);
     await save('addWork', p);
@@ -306,35 +392,11 @@ function renderSettings() {
     <div class="field"><label>合言葉(使わない場合は空欄)</label><input id="s-token" value="${esc(cfg.token)}"></div>
     <div class="field"><label>記録者の名前(任意)</label><input id="s-rec" value="${esc(cfg.recorder)}" placeholder="ゆい など"></div>
     <button class="btn" id="s-save">保存して接続テスト</button>
-    <div class="section"><h2>作物マスタ</h2><div id="m-作物"></div></div>
-    <div class="section"><h2>販路マスタ</h2><div id="m-販路"></div></div>
-    <div class="section"><h2>作業種別マスタ</h2><div id="m-作業種別"></div></div>
-    <p class="note">マスタを変更すると入力画面の選択肢に反映されます。過去の記録は変わりません。</p>`;
-  ['作物', '販路', '作業種別'].forEach(kind => drawMaster(kind));
+    <p class="note">作物・販路・作業種別の選択肢は、記録の入力画面で「編集」「＋」からいつでも変更できます。</p>`;
   $('#s-save').addEventListener('click', async () => {
     cfg.url = $('#s-url').value; cfg.token = $('#s-token').value; cfg.recorder = $('#s-rec').value;
     await reload();
   });
-}
-function drawMaster(kind) {
-  const box = $('#m-' + kind); if (!box) return;
-  box.innerHTML = S.masters[kind].map(n =>
-    `<div class="master-item"><span>${esc(n)}</span><button data-k="${kind}" data-n="${esc(n)}" class="m-del">削除</button></div>`).join('') +
-    `<div class="master-item"><input placeholder="追加する名前" id="add-${kind}" style="border:0;padding:4px 0"><button class="m-add" data-k="${kind}">追加</button></div>`;
-  box.onclick = async e => {
-    const del = e.target.closest('.m-del');
-    const add = e.target.closest('.m-add');
-    try {
-      if (del) {
-        if (!confirm(`「${del.dataset.n}」を選択肢から外しますか?`)) return;
-        S.masters = await api('deleteMaster', { kind: del.dataset.k, name: del.dataset.n });
-      } else if (add) {
-        const v = $('#add-' + add.dataset.k).value.trim(); if (!v) return;
-        S.masters = await api('addMaster', { kind: add.dataset.k, name: v });
-      } else return;
-      drawMaster(kind); toast('更新しました');
-    } catch (err) { toast(err.message); }
-  };
 }
 
 /* ---------- タブ切替 ---------- */
