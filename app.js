@@ -1,4 +1,4 @@
-/* ヤマネコファーム v2 — app.js */
+/* ヤマネコファーム v2.1 — app.js */
 'use strict';
 
 /* ---------- 設定と状態 ---------- */
@@ -15,7 +15,7 @@ let S = {
   masters: { 作物: [], 販路: [], 作業種別: [] },
   work: [], sales: [],
   tab: 'home', recTab: 'sales',
-  chat: [], // {role:'user'|'model', text}
+  chat: [],
   loaded: false,
 };
 try { Object.assign(S, JSON.parse(localStorage.getItem('cache') || '{}'), { tab: 'home', chat: [] }); } catch (e) {}
@@ -24,7 +24,7 @@ const $ = (s, el) => (el || document).querySelector(s);
 const view = $('#view');
 const yen = n => '¥' + Number(n || 0).toLocaleString('ja-JP');
 const num = n => Number(n || 0).toLocaleString('ja-JP');
-const today = () => new Date().toLocaleDateString('sv-SE'); // yyyy-mm-dd
+const today = () => new Date().toLocaleDateString('sv-SE');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ---------- API ---------- */
@@ -50,13 +50,26 @@ async function reload(silent) {
   } catch (e) { toast(e.message); }
 }
 
+/** マスタが空なら取得し直してから続行 */
+async function ensureMasters() {
+  if (S.masters.作物.length && S.masters.販路.length) return true;
+  toast('選択肢を読み込み中…', true);
+  await reload(true);
+  $('#toast').hidden = true;
+  if (!S.masters.作物.length) {
+    toast('マスタが空です。スプレッドシートの「マスタ」シートを確認してください。');
+    return false;
+  }
+  return true;
+}
+
 /* ---------- 共通UI ---------- */
 let toastTimer;
 function toast(msg, hold) {
   const t = $('#toast');
   t.textContent = msg; t.hidden = false;
   clearTimeout(toastTimer);
-  if (!hold) toastTimer = setTimeout(() => t.hidden = true, 2400);
+  if (!hold) toastTimer = setTimeout(() => t.hidden = true, 2600);
 }
 function openSheet(html) {
   $('#sheet').innerHTML = html;
@@ -81,16 +94,49 @@ function bindChips(root) {
 }
 const chipVal = name => $(`[data-chips="${name}"] .chip.on`)?.dataset.v || '';
 
+/* ---------- Face IDロック ---------- */
+const lock = {
+  get on() { return localStorage.getItem('lockOn') === '1'; },
+  set on(v) { localStorage.setItem('lockOn', v ? '1' : '0'); },
+  get id() { return localStorage.getItem('lockId') || ''; },
+  set id(v) { localStorage.setItem('lockId', v); },
+};
+const bufToB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+function b64ToBuf(b64) {
+  const s = atob(b64); const a = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+  return a.buffer;
+}
+async function enrollLock() {
+  const cred = await navigator.credentials.create({ publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    rp: { name: 'ヤマネコファーム' },
+    user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'yamaneko', displayName: 'ヤマネコファーム' },
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+    authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+    timeout: 60000,
+  }});
+  lock.id = bufToB64(cred.rawId);
+  lock.on = true;
+}
+async function verifyLock() {
+  await navigator.credentials.get({ publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    allowCredentials: [{ type: 'public-key', id: b64ToBuf(lock.id), transports: ['internal'] }],
+    userVerification: 'required', timeout: 60000,
+  }});
+}
+async function tryUnlock() {
+  try {
+    await verifyLock();
+    $('#lockscreen').hidden = true;
+  } catch (e) { toast('解除できませんでした。もう一度お試しください。'); }
+}
+
 /* ---------- 集計 ---------- */
 function monthKey(d) { return String(d || '').slice(0, 7); }
-function thisMonthSales() {
-  const m = monthKey(today());
-  return S.sales.filter(r => monthKey(r['販売日']) === m);
-}
-function thisMonthWork() {
-  const m = monthKey(today());
-  return S.work.filter(r => monthKey(r['作業日']) === m);
-}
+function thisMonthSales() { const m = monthKey(today()); return S.sales.filter(r => monthKey(r['販売日']) === m); }
+function thisMonthWork() { const m = monthKey(today()); return S.work.filter(r => monthKey(r['作業日']) === m); }
 
 /* ---------- ホーム ---------- */
 function renderHome() {
@@ -108,14 +154,14 @@ function renderHome() {
       <div class="eyebrow">${monthLabel}月の売上 — ヤマネコファーム</div>
       <div class="big-num"><span class="yen">¥</span>${num(total)}</div>
       <div class="sub-stats">
-        <div><div class="n">${ms.length}</div><div class="l">販売件数</div></div>
-        <div><div class="n">${mw.length}</div><div class="l">作業記録</div></div>
-        <div><div class="n">${new Set(ms.map(r => r['品目'])).size}</div><div class="l">売れた品目</div></div>
+        <div><div class="n"><em>${ms.length}</em></div><div class="l">販売件数</div></div>
+        <div><div class="n"><em>${mw.length}</em></div><div class="l">作業記録</div></div>
+        <div><div class="n"><em>${new Set(ms.map(r => r['品目'])).size}</em></div><div class="l">売れた品目</div></div>
       </div>
     </div>
     <div class="section">
       <h2>最近の記録 <button class="more" id="goRec">すべて見る</button></h2>
-      <div id="recentList">${recent.length ? recent.map(x => recRow(x.k, x.r, false)).join('') : `<div class="empty">${S.loaded ? 'まだ記録がありません。記録タブの + から始めましょう。' : '設定タブでGASのURLと合言葉を登録すると、データが表示されます。'}</div>`}</div>
+      <div id="recentList">${recent.length ? recent.map(x => recRow(x.k, x.r, false)).join('') : `<div class="empty">${S.loaded ? 'まだ記録がありません。<br>記録タブの + から始めましょう。' : '設定タブでGASのURLを登録すると、<br>データが表示されます。'}</div>`}</div>
     </div>`;
   $('#goRec').addEventListener('click', () => switchTab('records'));
 }
@@ -143,8 +189,8 @@ function renderRecords() {
   const list = isSales ? S.sales : S.work;
   view.innerHTML = `
     <div class="seg">
-      <button data-s="sales" class="${isSales ? 'on' : ''}">販売</button>
-      <button data-s="work" class="${!isSales ? 'on' : ''}">作業</button>
+      <button data-s="sales" class="${isSales ? 'on' : ''}">販売<span class="cnt">${S.sales.length}</span></button>
+      <button data-s="work" class="${!isSales ? 'on' : ''}">作業<span class="cnt">${S.work.length}</span></button>
     </div>
     <div id="list">${list.length ? list.map(r => recRow(S.recTab, r, true)).join('') : '<div class="empty">まだ記録がありません</div>'}</div>
     <button class="fab" id="fab" aria-label="記録を追加">＋</button>`;
@@ -165,7 +211,8 @@ function renderRecords() {
   });
 }
 
-function sheetSales() {
+async function sheetSales() {
+  if (!await ensureMasters()) return;
   openSheet(`
     <h3>販売を記録</h3>
     <div class="field"><label>販売日</label><input type="date" id="f-date" value="${today()}"></div>
@@ -193,7 +240,8 @@ function sheetSales() {
   });
 }
 
-function sheetWork() {
+async function sheetWork() {
+  if (!await ensureMasters()) return;
   openSheet(`
     <h3>作業を記録</h3>
     <div class="field"><label>作業日</label><input type="date" id="f-date" value="${today()}"></div>
@@ -272,7 +320,7 @@ function renderAnalysis() {
 }
 function drawChat() {
   const c = $('#chat'); if (!c) return;
-  c.innerHTML = S.chat.map(m => `<div class="msg ${m.role === 'user' ? 'user' : 'ai'}">${esc(m.text)}</div>`).join('') || c.innerHTML;
+  if (S.chat.length) c.innerHTML = S.chat.map(m => `<div class="msg ${m.role === 'user' ? 'user' : 'ai'}">${esc(m.text)}</div>`).join('');
   window.scrollTo(0, document.body.scrollHeight);
 }
 async function ask(question, label) {
@@ -291,10 +339,16 @@ async function ask(question, label) {
 
 /* ---------- 設定 ---------- */
 function renderSettings() {
+  const lockable = !!window.PublicKeyCredential;
   view.innerHTML = `
     <div class="eyebrow" style="margin-bottom:14px">設定</div>
-    <div class="field"><label>GAS WebアプリのURL</label><input id="s-url" value="${esc(cfg.url)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
-    <div class="field"><label>合言葉(APP_TOKEN)</label><input id="s-token" value="${esc(cfg.token)}"></div>
+    <div class="lock-row">
+      <div><div class="t">Face IDロック</div>
+      <div class="d">${lockable ? 'アプリを開くたびに顔認証/指紋認証を求めます(この端末のみ)' : 'この環境では利用できません'}</div></div>
+      <button class="switch ${lock.on ? 'on' : ''}" id="lockToggle" ${lockable ? '' : 'disabled'}>${lock.on ? 'ON' : 'OFF'}</button>
+    </div>
+    <div class="field" style="margin-top:18px"><label>GAS WebアプリのURL</label><input id="s-url" value="${esc(cfg.url)}" placeholder="https://script.google.com/macros/s/…/exec"></div>
+    <div class="field"><label>合言葉(使わない場合は空欄)</label><input id="s-token" value="${esc(cfg.token)}"></div>
     <div class="field"><label>記録者の名前(任意)</label><input id="s-rec" value="${esc(cfg.recorder)}" placeholder="ゆい など"></div>
     <button class="btn" id="s-save">保存して接続テスト</button>
     <div class="section"><h2>作物マスタ</h2><div id="m-作物"></div></div>
@@ -306,12 +360,23 @@ function renderSettings() {
     cfg.url = $('#s-url').value; cfg.token = $('#s-token').value; cfg.recorder = $('#s-rec').value;
     await reload();
   });
+  $('#lockToggle').addEventListener('click', async () => {
+    try {
+      if (lock.on) {
+        await verifyLock();
+        lock.on = false; toast('Face IDロックを解除しました');
+      } else {
+        await enrollLock(); toast('Face IDロックを有効にしました');
+      }
+      renderSettings();
+    } catch (e) { toast('認証がキャンセルされました'); }
+  });
 }
 function drawMaster(kind) {
   const box = $('#m-' + kind); if (!box) return;
   box.innerHTML = S.masters[kind].map(n =>
     `<div class="master-item"><span>${esc(n)}</span><button data-k="${kind}" data-n="${esc(n)}" class="m-del">削除</button></div>`).join('') +
-    `<div class="master-item"><input placeholder="追加する名前" id="add-${kind}" style="border:0;padding:4px 0"><button class="m-add" data-k="${kind}" style="color:var(--green);font-weight:700">追加</button></div>`;
+    `<div class="master-item"><input placeholder="追加する名前" id="add-${kind}" style="border:0;padding:4px 0"><button class="m-add" data-k="${kind}">追加</button></div>`;
   box.onclick = async e => {
     const del = e.target.closest('.m-del');
     const add = e.target.closest('.m-add');
@@ -342,6 +407,11 @@ $('#tabbar').addEventListener('click', e => {
 });
 
 /* ---------- 起動 ---------- */
+if (lock.on && window.PublicKeyCredential) {
+  $('#lockscreen').hidden = false;
+  $('#unlockBtn').addEventListener('click', tryUnlock);
+  tryUnlock();
+} 
 render();
 if (cfg.url) reload(true); else switchTab('settings');
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');

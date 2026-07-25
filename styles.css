@@ -1,5 +1,5 @@
-/* ヤマネコファーム v2 — NRC風ミニマル
-   tokens: paper #FFFFFF / ink #101312 / mist #F4F6F5 / gray #6E7673 / green #0AA05A / line #E4E8E6 */
+/* ヤマネコファーム v2.1 — NRC風・メリハリ強化
+   tokens: paper #FFF / ink #101312 / mist #F4F6F5 / gray #6E7673 / green #0AA05A / volt #C8F23C / amber #F5A524 */
 :root {
   --paper: #ffffff;
   --ink: #101312;
@@ -7,8 +7,9 @@
   --gray: #6e7673;
   --green: #0aa05a;
   --green-dark: #078549;
+  --volt: #c8f23c;
+  --amber: #f5a524;
   --line: #e4e8e6;
-  --radius: 16px;
   --num: "Barlow Condensed", sans-serif;
   --body: "Noto Sans JP", sans-serif;
 }
@@ -24,40 +25,47 @@ input, select, textarea {
   font-family: inherit; font-size: 1rem; width: 100%;
   border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--paper);
 }
+input[type="date"] { -webkit-appearance: none; appearance: none; min-height: 49px; text-align: left; }
 input:focus, textarea:focus, select:focus { outline: 2px solid var(--green); border-color: transparent; }
 
-main { max-width: 560px; margin: 0 auto; padding: 20px 18px 32px; }
+/* ステータスバー/ノッチに食い込まないよう上に余白 */
+main { max-width: 560px; margin: 0 auto; padding: calc(18px + env(safe-area-inset-top)) 18px 32px; }
 
 /* ---- 見出し・数字 ---- */
 .eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .14em; color: var(--gray); text-transform: uppercase; }
 .big-num {
-  font-family: var(--num); font-weight: 700; font-size: clamp(64px, 22vw, 104px);
+  font-family: var(--num); font-weight: 700; font-size: clamp(60px, 20vw, 96px);
   line-height: .95; letter-spacing: -.01em; font-variant-numeric: tabular-nums;
 }
-.big-num .yen { font-size: .38em; font-weight: 600; color: var(--gray); margin-right: .08em; }
-.sub-stats { display: flex; gap: 28px; margin-top: 18px; }
-.sub-stats .n { font-family: var(--num); font-weight: 700; font-size: 30px; line-height: 1; }
-.sub-stats .l { font-size: .74rem; color: var(--gray); margin-top: 4px; }
+.big-num .yen { font-size: .38em; font-weight: 600; opacity: .55; margin-right: .08em; }
 
-.hero { padding: 18px 0 26px; border-bottom: 1px solid var(--line); }
-.hero .eyebrow { margin-bottom: 10px; }
+/* NRC風: 黒カードのヒーロー + ボルトイエローの差し色 */
+.hero {
+  background: var(--ink); color: #fff; border-radius: 24px;
+  padding: 24px 22px 26px; margin-bottom: 4px;
+}
+.hero .eyebrow { color: var(--volt); margin-bottom: 12px; }
+.sub-stats { display: flex; gap: 30px; margin-top: 20px; }
+.sub-stats .n { font-family: var(--num); font-weight: 700; font-size: 30px; line-height: 1; color: #fff; }
+.sub-stats .n em { font-style: normal; color: var(--volt); }
+.sub-stats .l { font-size: .72rem; color: rgba(255,255,255,.55); margin-top: 4px; }
 
 /* ---- セクション/リスト ---- */
 .section { margin-top: 26px; }
-.section h2 { font-size: .95rem; font-weight: 700; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: baseline; }
-.section h2 .more { font-size: .78rem; color: var(--green); font-weight: 500; }
+.section h2 { font-size: .95rem; font-weight: 700; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: baseline; }
+.section h2 .more { font-size: .78rem; color: var(--green); font-weight: 700; }
 
 .rec { display: flex; align-items: center; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--line); }
 .rec .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); flex: none; }
-.rec .dot.work { background: var(--ink); }
+.rec .dot.work { background: var(--amber); }
 .rec .body { flex: 1; min-width: 0; }
 .rec .t1 { font-weight: 500; font-size: .95rem; }
 .rec .t2 { font-size: .78rem; color: var(--gray); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rec .amt { font-family: var(--num); font-weight: 700; font-size: 22px; font-variant-numeric: tabular-nums; }
-.rec .del { color: var(--gray); font-size: .8rem; padding: 6px; }
+.rec .del { color: var(--gray); font-size: .8rem; padding: 6px; flex: none; }
 .rec img.thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 10px; flex: none; }
 
-.empty { color: var(--gray); font-size: .88rem; padding: 26px 0; text-align: center; }
+.empty { color: var(--gray); font-size: .88rem; padding: 26px 0; text-align: center; line-height: 1.8; }
 
 /* ---- チップ・セグメント ---- */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -65,10 +73,11 @@ main { max-width: 560px; margin: 0 auto; padding: 20px 18px 32px; }
   padding: 9px 15px; border-radius: 999px; border: 1.5px solid var(--line);
   font-size: .88rem; font-weight: 500; background: var(--paper);
 }
-.chip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.chip.on { background: var(--ink); color: var(--volt); border-color: var(--ink); font-weight: 700; }
 .seg { display: flex; background: var(--mist); border-radius: 999px; padding: 4px; margin-bottom: 16px; }
-.seg button { flex: 1; padding: 9px 0; border-radius: 999px; font-weight: 700; font-size: .88rem; color: var(--gray); }
+.seg button { flex: 1; padding: 10px 0; border-radius: 999px; font-weight: 700; font-size: .9rem; color: var(--gray); }
 .seg button.on { background: var(--ink); color: #fff; }
+.seg button.on .cnt { color: var(--volt); font-family: var(--num); margin-left: 5px; }
 
 /* ---- FAB ---- */
 .fab {
@@ -81,20 +90,21 @@ main { max-width: 560px; margin: 0 auto; padding: 20px 18px 32px; }
 
 /* ---- タブバー ---- */
 .tabbar {
-  position: fixed; left: 0; right: 0; bottom: 0; display: flex;
+  position: fixed; left: 0; right: 0; bottom: 0; display: flex; z-index: 30;
   background: rgba(255,255,255,.94); backdrop-filter: blur(12px);
   border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
 }
-.tabbar button { flex: 1; padding: 10px 0 8px; font-size: .68rem; font-weight: 500; color: var(--gray); }
-.tabbar button .ico { display: block; font-size: 19px; margin-bottom: 2px; }
+.tabbar button { flex: 1; padding: 9px 0 7px; font-size: .66rem; font-weight: 500; color: #b6bdba; }
+.tabbar button svg { display: block; width: 22px; height: 22px; margin: 0 auto 3px; }
 .tabbar button.active { color: var(--ink); font-weight: 700; }
+.tabbar button.active svg { color: var(--green); }
 
 /* ---- ボトムシート ---- */
 .sheet-backdrop { position: fixed; inset: 0; background: rgba(16,19,18,.4); z-index: 40; }
 .sheet {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
   background: var(--paper); border-radius: 22px 22px 0 0; padding: 22px 20px calc(24px + env(safe-area-inset-bottom));
-  max-height: 88vh; overflow-y: auto; max-width: 560px; margin: 0 auto;
+  max-height: 86vh; overflow-y: auto; max-width: 560px; margin: 0 auto;
   animation: up .22s ease;
 }
 @keyframes up { from { transform: translateY(40px); opacity: 0; } }
@@ -103,7 +113,7 @@ main { max-width: 560px; margin: 0 auto; padding: 20px 18px 32px; }
 .field { margin-bottom: 15px; }
 .field label { display: block; font-size: .76rem; font-weight: 700; color: var(--gray); margin-bottom: 7px; }
 .row2 { display: flex; gap: 10px; }
-.row2 .field { flex: 1; }
+.row2 .field { flex: 1; min-width: 0; }
 
 .btn {
   display: block; width: 100%; padding: 15px; border-radius: 999px;
@@ -114,14 +124,14 @@ main { max-width: 560px; margin: 0 auto; padding: 20px 18px 32px; }
 .btn-ghost { display: block; width: 100%; padding: 12px; text-align: center; color: var(--gray); font-size: .88rem; }
 
 /* ---- 分析チャット ---- */
-.presets { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 6px; }
+.presets { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 6px; -webkit-overflow-scrolling: touch; }
 .presets .chip { flex: none; }
-.chat { display: flex; flex-direction: column; gap: 12px; padding: 8px 0 90px; }
+.chat { display: flex; flex-direction: column; gap: 12px; padding: 8px 0 96px; }
 .msg { max-width: 86%; padding: 12px 15px; border-radius: 18px; font-size: .92rem; line-height: 1.65; white-space: pre-wrap; }
 .msg.user { align-self: flex-end; background: var(--ink); color: #fff; border-bottom-right-radius: 6px; }
 .msg.ai { align-self: flex-start; background: var(--mist); border-bottom-left-radius: 6px; }
 .chat-input {
-  position: fixed; left: 0; right: 0; bottom: calc(62px + env(safe-area-inset-bottom));
+  position: fixed; left: 0; right: 0; bottom: calc(64px + env(safe-area-inset-bottom)); z-index: 20;
   background: var(--paper); border-top: 1px solid var(--line); padding: 10px 14px;
 }
 .chat-input .inner { max-width: 560px; margin: 0 auto; display: flex; gap: 8px; }
@@ -129,14 +139,28 @@ main { max-width: 560px; margin: 0 auto; padding: 20px 18px 32px; }
 .chat-input button { flex: none; width: 46px; height: 46px; border-radius: 50%; background: var(--green); color: #fff; font-size: 18px; }
 
 /* ---- 設定 ---- */
-.master-item { display: flex; justify-content: space-between; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: .93rem; }
-.master-item button { color: var(--gray); font-size: .8rem; }
+.master-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: .93rem; }
+.master-item input { flex: 1; min-width: 0; }
+.master-item button { color: var(--gray); font-size: .8rem; flex: none; white-space: nowrap; }
+.master-item .m-add { color: var(--green); font-weight: 700; }
 .note { font-size: .78rem; color: var(--gray); line-height: 1.7; margin-top: 8px; }
+.lock-row { display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.lock-row .t { font-weight: 700; font-size: .93rem; }
+.lock-row .d { font-size: .76rem; color: var(--gray); margin-top: 3px; }
+.switch { flex: none; padding: 9px 16px; border-radius: 999px; font-weight: 700; font-size: .82rem; background: var(--mist); color: var(--gray); }
+.switch.on { background: var(--green); color: #fff; }
+
+/* ---- Face IDロック画面 ---- */
+.lockscreen {
+  position: fixed; inset: 0; z-index: 100; background: var(--paper);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+  padding: 20px;
+}
+.lock-icon { width: 84px; height: 84px; border-radius: 22px; }
+.lock-name { font-weight: 700; letter-spacing: .04em; margin-bottom: 8px; }
 
 .toast {
-  position: fixed; left: 50%; transform: translateX(-50%);
+  position: fixed; left: 50%; transform: translateX(-50%); max-width: 90vw; width: max-content;
   bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 60;
   background: var(--ink); color: #fff; padding: 11px 20px; border-radius: 999px; font-size: .86rem;
 }
-.spin { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--green); border-radius: 50%; animation: sp .8s linear infinite; }
-@keyframes sp { to { transform: rotate(360deg); } }

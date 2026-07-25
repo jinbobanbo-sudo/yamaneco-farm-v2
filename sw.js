@@ -1,5 +1,5 @@
 /* ヤマネコファーム v2 — Service Worker(アプリの外枠だけキャッシュ) */
-const CACHE = 'yamaneko-v2-1';
+const CACHE = 'yamaneko-v2-2';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
